@@ -9,8 +9,7 @@ report:
     isCachable: true
     cacheDuration: 600
   scheduling:
-    isScheduled: true
-    schedule: "0 0 * * *" # Daily at midnight
+    isScheduled: false
 
 variables:
   - name: "workerStatus"
@@ -41,3 +40,52 @@ sql: |
   WHERE "w"."status" IN (${workerStatus})
     AND "wp"."license_expiry" < extract(epoch from current_timestamp)::bigint
   ORDER BY "w"."first_name" ${sortOrder};
+
+# -------------------------------------------------------------------------------------------------
+report:
+  title: "Get Workers with Expired Hazmat Endorsements"
+  description: "Identifies workers whose hazmat endorsements have expired."
+  version: 1
+  tags:
+    - "Compliance"
+    - "Workers"
+  caching:
+    isCachable: true
+    cacheDuration: 600
+  scheduling:
+    isScheduled: false
+
+variables:
+  - name: "workerStatus"
+    placeholder: "${workerStatus}"
+    type: "string"
+    default: "Active"
+    description: "Status of workers to include in the report."
+    isRequired: true
+    allowedValues: ["Active", "Inactive"]
+
+  - name: "sortOrder"
+    placeholder: "${sortOrder}"
+    type: "string"
+    default: "ASC"
+    description: "Sort order for the worker names (ASC or DESC)."
+    isRequired: false
+    allowedValues: ["ASC", "DESC"]
+
+sql: |
+SELECT
+    "w"."first_name",
+    "w"."last_name",
+    "wp"."license_number",
+    "wp"."license_expiry",
+    "wp"."endorsement",
+    CAST(to_timestamp("wp"."hazmat_expiry") AS DATE) AS "hazmat_expiry"
+FROM
+    "workers" AS "w"
+    LEFT JOIN "worker_profiles" AS "wp" ON "wp"."worker_id" = "w"."id"
+WHERE
+    "w"."status" = ${workerStatus}
+    AND "wp"."endorsement" IN ('H', 'X')
+    AND "wp"."hazmat_expiry" < extract(epoch FROM CURRENT_TIMESTAMP)::bigint
+ORDER BY
+    "w"."first_name" ${sortOrder};
