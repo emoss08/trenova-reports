@@ -1,12 +1,10 @@
 report:
   title: "Get Workers with Expired Licenses"
   description: "Identifies workers whose licenses have expired."
-  category: "Compliance"
   version: 1
   tags:
     - "Compliance"
     - "Workers"
-    - "Expired Licenses"
   caching:
     isCachable: true
     cacheDuration: 600
