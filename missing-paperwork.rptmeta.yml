@@ -1,0 +1,125 @@
+report:
+  title: "Shipments with Missing Paperwork"
+  description: "Identifies shipments with missing required paperwork"
+  version: 1
+  tags:
+    - "Compliance"
+    - "Shipments"
+  caching:
+    isCachable: true
+    cacheDuration: 3600
+  scheduling:
+    isScheduled: false
+  variables:
+    - name: "shipmentStatus"
+      placeholder: "${shipmentStatus}"
+      type: "string"
+      default: "Completed"
+      description: "Status of shipments to include in the report"
+      isRequired: true
+      allowedValues: ["New", "InTransit", "Delayed", "Completed"]
+
+  sql: |
+WITH 
+  available_shipments AS (
+    SELECT
+        s.id AS shipment_id,
+        s.organization_id,
+        s.business_unit_id,
+        s.pro_number,
+        s.status,
+        c.id AS customer_id,
+        c.name AS customer_name,
+        cbp.document_type_ids AS required_document_type_ids
+    FROM
+        shipments s
+    JOIN customers c 
+        ON s.customer_id = c.id 
+        AND s.organization_id = c.organization_id 
+        AND s.business_unit_id = c.business_unit_id
+    JOIN customer_billing_profiles cbp 
+        ON c.id = cbp.customer_id 
+        AND c.organization_id = cbp.organization_id 
+        AND c.business_unit_id = cbp.business_unit_id
+    WHERE
+        s.status = ${shipmentStatus}
+        AND array_length(cbp.document_type_ids, 1) > 0
+),
+document_type_info AS (
+    SELECT 
+        dt.id,
+        dt.organization_id,
+        dt.business_unit_id,
+        dt.name AS document_type_name,
+        dt.code AS document_type_code,
+        dt.document_category
+    FROM 
+        document_types dt
+),
+shipment_documents AS (
+    SELECT 
+        d.resource_id AS shipment_id,
+        d.organization_id,
+        d.business_unit_id,
+        d.document_type_id,
+        d.file_name,
+        d.status AS document_status
+    FROM 
+        documents d
+    WHERE 
+        d.resource_type = 'shipment'
+        AND d.status IN ('Active', 'Pending', 'PendingApproval')
+),
+missing_documents AS (
+    SELECT 
+        cs.shipment_id,
+        cs.organization_id,
+        cs.business_unit_id,
+        cs.pro_number,
+        cs.customer_name,
+        cs.status AS shipment_status,
+        dt.document_type_name,
+        dt.document_type_code,
+        dt.document_category,
+        CASE 
+            WHEN sd.document_type_id IS NULL THEN 'Missing'
+            ELSE sd.document_status::text
+        END AS document_status,
+        sd.file_name
+    FROM 
+        ava cs
+    CROSS JOIN UNNEST(cs.required_document_type_ids) AS req_doc_type_id
+    JOIN document_type_info dt 
+        ON dt.id = req_doc_type_id
+        AND dt.organization_id = cs.organization_id
+        AND dt.business_unit_id = cs.business_unit_id
+    LEFT JOIN shipment_documents sd
+        ON sd.shipment_id = cs.shipment_id
+        AND sd.document_type_id = req_doc_type_id
+        AND sd.organization_id = cs.organization_id
+        AND sd.business_unit_id = cs.business_unit_id
+    WHERE 
+        -- Only include missing documents or non-active documents
+        sd.document_type_id IS NULL
+        OR sd.document_status <> 'Active'
+)
+SELECT 
+    md.shipment_id,
+    md.pro_number,
+    md.customer_name,
+    md.shipment_status,
+    COUNT(*) AS missing_document_count,
+    array_agg(md.document_type_name) AS missing_document_names,
+    array_agg(md.document_type_code) AS missing_document_codes,
+    array_agg(md.document_category) AS document_categories,
+    array_agg(md.document_status) AS document_statuses
+FROM 
+    missing_documents md
+GROUP BY 
+    md.shipment_id,
+    md.pro_number,
+    md.customer_name,
+    md.shipment_status
+ORDER BY 
+    md.customer_name,
+    md.pro_number;
