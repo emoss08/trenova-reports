@@ -99,7 +99,6 @@ missing_documents AS (
         AND sd.organization_id = cs.organization_id
         AND sd.business_unit_id = cs.business_unit_id
     WHERE 
-        -- Only include missing documents or non-active documents
         sd.document_type_id IS NULL
         OR sd.document_status <> 'Active'
 )
